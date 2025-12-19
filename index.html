@@ -1,0 +1,1650 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Hydranten Assist – Feuerwehr</title>
+
+  <!-- Leaflet -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+
+  <!-- PapaParse (CSV) -->
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+
+  <style>
+    :root{
+      --bg:#0b0b0b;
+      --text:#f1f1f1;
+      --warn:#ffd400;
+      --fire:#e01212;
+      --blue:#2f86ff;
+      --ok:#2ee59d;
+
+      --outer: 0 24px 70px rgba(0,0,0,.70);
+      --inner: inset 0 1px 0 rgba(255,255,255,.08), inset 0 -1px 0 rgba(0,0,0,.55);
+      --innerDeep: inset 0 1px 0 rgba(255,255,255,.08), inset 0 0 0 1px rgba(0,0,0,.65), inset 0 -10px 30px rgba(0,0,0,.55);
+
+      --r:18px;
+      --r2:26px;
+
+      --stGreen: rgba(46,229,157,1);
+      --stYellow: rgba(255,212,0,1);
+      --stRed: rgba(224,18,18,1);
+    }
+
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{
+      margin:0;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+      color:var(--text);
+      background:
+        radial-gradient(1200px 700px at 50% 10%, rgba(255,255,255,.06), transparent 55%),
+        radial-gradient(900px 450px at 15% 0%, rgba(224,18,18,.10), transparent 55%),
+        radial-gradient(900px 450px at 85% 0%, rgba(47,134,255,.10), transparent 55%),
+        linear-gradient(180deg, #060606, var(--bg));
+      overflow:hidden;
+    }
+
+    header{
+      position:fixed; inset:0 0 auto 0;
+      height:64px;
+      display:flex; align-items:center; justify-content:space-between;
+      padding:0 18px;
+      z-index:2000;
+      background: linear-gradient(180deg, rgba(18,18,18,.98), rgba(12,12,12,.92));
+      border-bottom:1px solid rgba(255,255,255,.08);
+      box-shadow: 0 12px 40px rgba(0,0,0,.70);
+    }
+    .brand{
+      font-weight:1000;
+      letter-spacing:.4px;
+      font-size:16px;
+      display:flex;
+      align-items:baseline;
+      gap:10px;
+      text-transform:uppercase;
+    }
+    .brand .fire{color:var(--fire)}
+    .brand .sub{
+      font-size:12px;
+      color:rgba(255,255,255,.55);
+      font-weight:900;
+      letter-spacing:.35px;
+      text-transform:none;
+    }
+
+    .nav{display:flex; gap:10px; align-items:center}
+    .chip{
+      padding:10px 14px;
+      border-radius: 12px;
+      border:1px solid rgba(255,255,255,.12);
+      background: linear-gradient(180deg, rgba(35,35,35,.92), rgba(20,20,20,.92));
+      box-shadow: var(--inner), 0 10px 28px rgba(0,0,0,.45);
+      cursor:pointer;
+      user-select:none;
+      transition: transform .08s ease, border-color .2s ease, filter .2s ease;
+      font-weight:1000;
+      font-size:13px;
+      text-transform:uppercase;
+      letter-spacing:.25px;
+    }
+    .chip:hover{border-color: rgba(255,255,255,.22); filter:brightness(1.05)}
+    .chip:active{transform:scale(.985)}
+    .chip.primary{
+      border-color: rgba(224,18,18,.55);
+      background: linear-gradient(180deg, rgba(235,25,25,.92), rgba(160,10,10,.92));
+      box-shadow: 0 14px 40px rgba(224,18,18,.25), var(--inner);
+    }
+    .chip.success{
+      border-color: rgba(46,229,157,.55);
+      background: linear-gradient(180deg, rgba(46,229,157,.95), rgba(18,120,80,.92));
+      box-shadow: 0 14px 40px rgba(46,229,157,.18), var(--inner);
+    }
+
+    #app{position:fixed; top:64px; left:0; right:0; bottom:0}
+    .view{height:100%; display:none}
+    .view.active{display:block}
+
+    .mapLayout{
+      height:100%;
+      display:grid;
+      grid-template-columns: 420px 1fr;
+      gap:18px;
+      padding:18px;
+      transition: grid-template-columns .22s ease;
+    }
+    .mapLayout.collapsed{grid-template-columns: 0px 1fr;}
+    .side{
+      min-width:0;
+      display:flex;
+      flex-direction:column;
+      gap:18px;
+      overflow:auto;
+      padding-right:4px;
+      opacity:1;
+      transform: translateX(0);
+      transition: opacity .18s ease, transform .22s ease;
+    }
+    .mapLayout.collapsed .side{opacity:0; transform: translateX(-12px); pointer-events:none;}
+
+    .mapCol{
+      min-width:0;
+      border-radius: var(--r2);
+      overflow:hidden;
+      border:1px solid rgba(255,255,255,.12);
+      background: linear-gradient(180deg, rgba(28,28,28,.90), rgba(16,16,16,.95));
+      box-shadow: var(--outer);
+      position:relative;
+    }
+    #map{height:100%; width:100%}
+
+    .panel{
+      background: linear-gradient(180deg, rgba(34,34,34,.92), rgba(22,22,22,.96));
+      border:1px solid rgba(255,255,255,.10);
+      border-radius: var(--r2);
+      box-shadow: var(--outer);
+      padding:16px;
+    }
+    .head{
+      display:flex; align-items:center; justify-content:space-between;
+      gap:12px;
+      padding-bottom:12px;
+      margin-bottom:14px;
+      border-bottom:1px solid rgba(255,255,255,.10);
+    }
+    .title{
+      font-weight:1000;
+      font-size:14px;
+      letter-spacing:.35px;
+      text-transform:uppercase;
+      color: var(--warn);
+    }
+    .badge{
+      font-size:12px;
+      padding:6px 10px;
+      border-radius: 10px;
+      border:1px solid rgba(255,255,255,.12);
+      color:rgba(255,255,255,.78);
+      background: linear-gradient(180deg, rgba(30,30,30,.90), rgba(18,18,18,.92));
+      box-shadow: var(--inner);
+      white-space:nowrap;
+      font-weight:900;
+    }
+    .badge.info{border-color: rgba(255,212,0,.35)}
+    .badge.fire{border-color: rgba(224,18,18,.35)}
+
+    label{
+      display:block;
+      font-size:12px;
+      color:rgba(255,255,255,.72);
+      margin:0 0 8px 0;
+      font-weight:900;
+      letter-spacing:.2px;
+    }
+    input, select, textarea{
+      width:100%;
+      padding:12px 12px;
+      border-radius: 12px;
+      border:1px solid rgba(255,255,255,.14);
+      background: linear-gradient(180deg, rgba(14,14,14,.98), rgba(20,20,20,.96));
+      color:var(--text);
+      outline:none;
+      box-shadow: var(--innerDeep);
+      transition: border-color .15s ease, filter .15s ease;
+      font-size:13px;
+    }
+    input:focus, select:focus, textarea:focus{
+      border-color: rgba(255,212,0,.55);
+      filter: brightness(1.05);
+    }
+    textarea{min-height:96px; resize:vertical}
+    .grid2{display:grid; grid-template-columns: 1fr 1fr; gap:12px}
+
+    /* Dropdown readability */
+    select{ color-scheme: dark; }
+    select option{ background:#101010; color:#ffffff; }
+
+    .btnrow{display:flex; gap:12px; flex-wrap:wrap; margin-top:12px}
+    .btn{
+      padding:12px 14px;
+      border-radius: 12px;
+      border:1px solid rgba(255,255,255,.14);
+      background: linear-gradient(180deg, rgba(35,35,35,.92), rgba(18,18,18,.94));
+      box-shadow: var(--inner), 0 12px 30px rgba(0,0,0,.50);
+      color:var(--text);
+      cursor:pointer;
+      user-select:none;
+      font-weight:1000;
+      font-size:13px;
+      text-transform:uppercase;
+      letter-spacing:.25px;
+      transition: transform .08s ease, filter .2s ease, border-color .2s ease;
+    }
+    .btn:hover{filter:brightness(1.06); border-color: rgba(255,255,255,.24)}
+    .btn:active{transform:scale(.985)}
+    .btn.primary{
+      border-color: rgba(224,18,18,.65);
+      background: linear-gradient(180deg, rgba(235,25,25,.95), rgba(150,10,10,.92));
+      box-shadow: 0 16px 46px rgba(224,18,18,.22), var(--inner);
+    }
+    .btn.ok{border-color: rgba(46,229,157,.35);}
+    .btn.warn{border-color: rgba(255,176,32,.40);}
+
+    .mini{font-size:12px; color:rgba(255,255,255,.62); line-height:1.35; margin-top:10px;}
+    .mono{font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace}
+
+    .accBtn{
+      width:100%;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      padding:12px 14px;
+      border-radius: 12px;
+      border:1px solid rgba(255,255,255,.14);
+      background: linear-gradient(180deg, rgba(35,35,35,.92), rgba(18,18,18,.94));
+      box-shadow: var(--inner);
+      color:var(--text);
+      cursor:pointer;
+      font-weight:1000;
+      text-transform:uppercase;
+      letter-spacing:.25px;
+    }
+    .accIcon{
+      width:30px;height:30px;border-radius:10px;
+      display:grid;place-items:center;
+      border:1px solid rgba(255,255,255,.12);
+      background: linear-gradient(180deg, rgba(20,20,20,.95), rgba(12,12,12,.95));
+      box-shadow: var(--inner);
+      transition: transform .16s ease;
+      user-select:none;
+    }
+    .acc.open .accIcon{transform: rotate(180deg)}
+    .accBody{display:none; margin-top:12px;}
+    .acc.open .accBody{display:block}
+
+    #settings{height:100%; overflow:auto; padding:18px}
+    .settingsGrid{height:100%; display:grid; grid-template-columns: 1fr 1fr 1fr; gap:18px}
+    @media (max-width: 980px){
+      .mapLayout{grid-template-columns: 1fr; grid-template-rows: 420px auto;}
+      .mapCol{height:420px}
+      .settingsGrid{grid-template-columns: 1fr}
+    }
+
+    .leaflet-tooltip{
+      background: linear-gradient(180deg, rgba(30,30,30,.98), rgba(18,18,18,.98));
+      color: var(--text);
+      border:1px solid rgba(255,255,255,.14);
+      border-radius: 14px;
+      padding:12px 12px;
+      box-shadow: var(--outer);
+    }
+    .leaflet-control-attribution{opacity:.7}
+
+    /* Hydrant marker base */
+    .hydrantSquare{
+      width:22px;height:22px;
+      border-radius:6px;
+      background: linear-gradient(180deg, rgba(47,134,255,.95), rgba(20,85,190,.95));
+      border:1px solid rgba(255,255,255,.80);
+      box-shadow: 0 14px 32px rgba(47,134,255,.22);
+      display:grid;place-items:center;
+      color:#fff;
+      font-weight:1000;
+      font-size:12px;
+      letter-spacing:.4px;
+      position:relative;
+      overflow:hidden;
+    }
+    .hydrantSquare::after{content:"H";}
+    .hydrantSquare.selected{
+      box-shadow: 0 0 0 6px rgba(47,134,255,.20), 0 14px 32px rgba(47,134,255,.28);
+      transform: translateY(-1px);
+    }
+
+    /* Status overlays */
+    .hydrantSquare.status-yellow::before,
+    .hydrantSquare.status-red::before{
+      content:"";
+      position:absolute;
+      inset:0;
+      pointer-events:none;
+      opacity:.55;
+    }
+    .hydrantSquare.status-yellow::before{
+      background: linear-gradient(180deg, rgba(255,212,0,.70), rgba(255,212,0,.20));
+      mix-blend-mode: screen;
+    }
+    .hydrantSquare.status-red::before{
+      background: linear-gradient(180deg, rgba(224,18,18,.75), rgba(224,18,18,.25));
+      mix-blend-mode: screen;
+    }
+    /* Red marker also slightly different shadow */
+    .hydrantSquare.status-red{
+      box-shadow: 0 14px 32px rgba(224,18,18,.18);
+      border-color: rgba(255,255,255,.70);
+    }
+
+    /* Incident marker: red dot + ring */
+    .incidentMarker{
+      position:relative;
+      width:14px;
+      height:14px;
+      border-radius:50%;
+      background: rgba(224,18,18,1);
+      border: 0;
+      box-shadow: 0 10px 24px rgba(224,18,18,.22);
+    }
+    .incidentMarker::before{
+      content:"";
+      position:absolute;
+      left:50%;
+      top:50%;
+      width:44px;
+      height:44px;
+      transform:translate(-50%,-50%);
+      border-radius:50%;
+      background: rgba(224,18,18,.22);
+      border: 2px solid rgba(224,18,18,.28);
+      pointer-events:none;
+    }
+
+    .sidebarToggle{
+      position:absolute;
+      top:14px; left:14px;
+      z-index:1300;
+      display:flex; gap:10px; align-items:center;
+      padding:12px 14px;
+      border-radius: 12px;
+      border:1px solid rgba(255,255,255,.14);
+      background: linear-gradient(180deg, rgba(35,35,35,.92), rgba(18,18,18,.94));
+      box-shadow: var(--inner), 0 12px 30px rgba(0,0,0,.55);
+      cursor:pointer;
+      user-select:none;
+      font-weight:1000;
+      text-transform:uppercase;
+      letter-spacing:.25px;
+      font-size:13px;
+    }
+
+    /* Hydrant status field (top-right, shows on hover) */
+    .statusBox{
+      position:absolute;
+      top:14px;
+      right:14px;
+      z-index:1400;
+      display:none;
+      align-items:center;
+      gap:10px;
+      padding:12px 14px;
+      border-radius: 14px;
+      border:1px solid rgba(255,255,255,.14);
+      background: linear-gradient(180deg, rgba(35,35,35,.92), rgba(18,18,18,.94));
+      box-shadow: var(--inner), 0 12px 30px rgba(0,0,0,.55);
+      user-select:none;
+      font-weight:1000;
+      text-transform:uppercase;
+      letter-spacing:.25px;
+      font-size:12px;
+    }
+    .statusBox.show{display:flex;}
+    .statusDot{
+      width:12px;height:12px;border-radius:50%;
+      box-shadow: 0 0 0 4px rgba(255,255,255,.06);
+    }
+    .statusDot.green{background: var(--stGreen); box-shadow: 0 0 0 5px rgba(46,229,157,.12);}
+    .statusDot.yellow{background: var(--stYellow); box-shadow: 0 0 0 5px rgba(255,212,0,.12);}
+    .statusDot.red{background: var(--stRed); box-shadow: 0 0 0 5px rgba(224,18,18,.12);}
+
+    .routeBar{
+      position:absolute;
+      left:18px; right:18px; bottom:18px;
+      padding:12px 14px;
+      border-radius: var(--r);
+      display:none;
+      align-items:center;
+      gap:14px;
+      z-index:1200;
+      background: linear-gradient(180deg, rgba(32,32,32,.96), rgba(20,20,20,.96));
+      border:1px solid rgba(255,255,255,.14);
+      box-shadow: var(--outer);
+    }
+    .routeBar.show{display:flex}
+    .routeLeft{flex:1; min-width:0; display:flex; align-items:center; gap:12px;}
+    .routeBadge{
+      width:42px;height:42px;
+      border-radius: 12px;
+      display:grid; place-items:center;
+      background: linear-gradient(180deg, rgba(47,134,255,.95), rgba(20,85,190,.95));
+      border:1px solid rgba(255,255,255,.18);
+      box-shadow: 0 16px 42px rgba(47,134,255,.22), var(--inner);
+      flex:0 0 auto;
+    }
+    .routeText{min-width:0; display:flex; flex-direction:column; gap:2px}
+    .routeTitle{
+      font-weight:1000;
+      text-transform:uppercase;
+      letter-spacing:.25px;
+      font-size:13px;
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+    }
+    .routeSub{
+      font-size:12px;
+      color:rgba(255,255,255,.65);
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+    }
+    .routeRight{display:flex; gap:12px; align-items:center; justify-content:flex-end; flex-wrap:wrap;}
+    .routeChip{
+      display:flex;
+      align-items:center;
+      gap:10px;
+      padding:10px 12px;
+      border-radius: 12px;
+      border:1px solid rgba(255,255,255,.14);
+      background: linear-gradient(180deg, rgba(35,35,35,.92), rgba(18,18,18,.94));
+      box-shadow: var(--inner), 0 12px 26px rgba(0,0,0,.45);
+      cursor:pointer;
+      user-select:none;
+      font-weight:1000;
+      text-transform:uppercase;
+      letter-spacing:.25px;
+      font-size:12px;
+      transition: transform .08s ease, filter .2s ease, border-color .2s ease;
+    }
+    .routeChip.active{
+      border-color: rgba(255,212,0,.55);
+      box-shadow: 0 0 0 3px rgba(255,212,0,.10), var(--inner);
+    }
+    .routeChip.disabled{opacity:.45; cursor:not-allowed; filter:none}
+    .metric{
+      padding:6px 10px;
+      border-radius: 12px;
+      background: linear-gradient(180deg, rgba(12,12,12,.92), rgba(18,18,18,.92));
+      border:1px solid rgba(255,255,255,.12);
+      box-shadow: var(--innerDeep);
+      font-size:12px;
+      font-weight:1000;
+      letter-spacing:.2px;
+    }
+    .icon{width:18px;height:18px; opacity:.96}
+
+    #toast{
+      position:fixed;
+      left:50%;
+      bottom:18px;
+      transform:translateX(-50%);
+      background: linear-gradient(180deg, rgba(30,30,30,.98), rgba(18,18,18,.98));
+      border:1px solid rgba(255,255,255,.14);
+      border-radius: 14px;
+      padding:12px 14px;
+      display:none;
+      gap:10px;
+      align-items:center;
+      box-shadow: var(--outer);
+      z-index:4000;
+    }
+    .dot{
+      width:10px;height:10px;border-radius:50%;
+      background: var(--fire);
+      box-shadow: 0 0 0 4px rgba(224,18,18,.16);
+      animation: pulse 1.3s ease-in-out infinite;
+    }
+    @keyframes pulse{0%,100%{transform:scale(1)} 50%{transform:scale(1.25)}}
+
+    /* Hidden blocks */
+    #miniAktuell, #miniRoute { display:none !important; }
+
+    /* Modal */
+    .modalBack{
+      position:fixed; inset:0;
+      background: rgba(0,0,0,.60);
+      display:none;
+      align-items:center;
+      justify-content:center;
+      z-index:9999;
+      padding:18px;
+    }
+    .modalBack.show{display:flex;}
+    .modal{
+      width:min(640px, 100%);
+      background: linear-gradient(180deg, rgba(34,34,34,.98), rgba(18,18,18,.98));
+      border:1px solid rgba(255,255,255,.14);
+      border-radius: 18px;
+      box-shadow: var(--outer);
+      padding:16px;
+    }
+    .modal .head{margin-bottom:12px;}
+  </style>
+</head>
+
+<body>
+<header>
+  <div class="brand">
+    <span>Hydranten Assist</span>
+    <span class="fire">Feuerwehr</span>
+    <span class="sub">Billigheim-Ingenheim</span>
+  </div>
+
+  <div class="nav">
+    <div class="chip" id="navMap">Karte</div>
+    <div class="chip" id="navSettings">Einstellungen</div>
+    <div class="chip success" id="btnCloseIncident">Einsatzabschluss</div>
+  </div>
+</header>
+
+<div id="app">
+  <!-- MAP VIEW -->
+  <div class="view active" id="viewMap">
+    <div class="mapLayout" id="mapLayout">
+      <div class="side" id="side">
+        <div class="panel">
+          <div class="head">
+            <div class="title">Einsatzort</div>
+            <div class="badge" id="incidentBadge">nicht gesetzt</div>
+          </div>
+
+          <div class="grid2">
+            <div>
+              <label>Ort</label>
+              <input id="in_city" placeholder="z.B. Billigheim-Ingenheim" />
+            </div>
+            <div>
+              <label>Straße + Hausnummer</label>
+              <input id="in_street" placeholder="z.B. Hauptstraße 12" />
+            </div>
+          </div>
+
+          <label style="margin-top:10px">Koordinaten (ein Feld: „lat, lon“)</label>
+          <input id="in_coords" class="mono" placeholder="z.B. 49.136000, 8.091000" />
+
+          <div class="btnrow">
+            <button class="btn primary" id="btnSetIncident">Karte setzen</button>
+            <button class="btn" id="btnUseMapClick">Per Kartenklick</button>
+          </div>
+
+          <div class="btnrow" style="margin-top:8px">
+            <button class="btn ok" id="btnGPS">Meine Position ermitteln</button>
+          </div>
+
+          <div class="mini" id="miniAktuell">
+            <span class="badge info">Aktuell</span>
+            <span class="mono" id="incidentCoords">—</span>
+          </div>
+          <div class="mini" id="miniRoute" style="margin-top:6px">
+            <span class="badge info">Route</span>
+            <span id="nearestInfo">—</span>
+          </div>
+
+          <div class="mini" id="gpsHint" style="display:none;"></div>
+        </div>
+
+        <div class="panel acc" id="accFilter">
+          <button class="accBtn" id="filterToggle">
+            <span>Filter</span>
+            <span class="accIcon">⌄</span>
+          </button>
+          <div class="accBody">
+            <div class="head" style="margin-top:12px">
+              <div class="title" style="margin:0">Anzeige</div>
+              <div class="badge fire" id="countBadge">0</div>
+            </div>
+
+            <label>Durchmesser (mm)</label>
+            <select id="diamFilter">
+              <option value="">egal</option>
+              <option value="80">80</option>
+              <option value="100">100</option>
+              <option value="200">200</option>
+              <option value="250">250</option>
+            </select>
+
+            <div style="height:12px"></div>
+            <label>Textsuche</label>
+            <input id="q" placeholder="ID, Typ, Hinweis …" />
+
+            <div class="btnrow">
+              <button class="btn warn" id="btnFindNearest">Nächsten (Route)</button>
+              <button class="btn" id="btnClearRoute">Route aus</button>
+            </div>
+
+            <div class="mini">Filter wirken auf Karte und Routing. Rot = wird ignoriert.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="mapCol">
+        <div id="map"></div>
+
+        <div class="sidebarToggle" id="sidebarToggle" title="Seitenleiste ein-/ausklappen">
+          <span id="sidebarToggleLabel">Panels</span>
+          <span style="opacity:.85">⇆</span>
+        </div>
+
+        <!-- Statusfeld rechts oben -->
+        <div class="statusBox" id="statusBox">
+          <span class="statusDot green" id="statusDot"></span>
+          <span id="statusText">Einsatzbereit</span>
+        </div>
+
+        <div class="routeBar" id="routeBar">
+          <div class="routeLeft">
+            <div class="routeBadge" aria-hidden="true">
+              <svg class="icon" viewBox="0 0 24 24" fill="none">
+                <path d="M10 3h4v3h2a2 2 0 0 1 2 2v3h-2v2h2v4a2 2 0 0 1-2 2h-2v-2h-4v2H8a2 2 0 0 1-2-2v-4h2v-2H6V8a2 2 0 0 1 2-2h2V3z" stroke="white" stroke-width="1.6" stroke-linejoin="round"/>
+                <path d="M9 12h6" stroke="white" stroke-width="1.6" stroke-linecap="round"/>
+              </svg>
+            </div>
+            <div class="routeText">
+              <div class="routeTitle" id="routeTitle">—</div>
+              <div class="routeSub" id="routeSub">Route auswählen (Auto / Fuß).</div>
+            </div>
+          </div>
+
+          <div class="routeRight">
+            <div class="routeChip" id="chipCar" title="Fahrzeugroute anzeigen">
+              <svg class="icon" viewBox="0 0 24 24" fill="none">
+                <path d="M3 13l2-6h14l2 6v6h-2a2 2 0 0 1-4 0H9a2 2 0 0 1-4 0H3v-6z" stroke="white" stroke-width="1.6" stroke-linejoin="round"/>
+                <path d="M7 13h10" stroke="white" stroke-width="1.6" stroke-linecap="round"/>
+              </svg>
+              <span>Auto</span>
+              <span class="metric" id="distCar">— m</span>
+            </div>
+
+            <div class="routeChip" id="chipFoot" title="Fußroute anzeigen">
+              <svg class="icon" viewBox="0 0 24 24" fill="none">
+                <path d="M12 5a2 2 0 1 0 0 4 2 2 0 0 0 0-4z" stroke="white" stroke-width="1.6"/>
+                <path d="M11 9l-2 4 3 2-1 4" stroke="white" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M13 11l3 2 2 5" stroke="white" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+              <span>Fuß</span>
+              <span class="metric" id="distFoot">— m</span>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- SETTINGS VIEW -->
+  <div class="view" id="viewSettings">
+    <div id="settings">
+      <div class="settingsGrid">
+        <div class="panel">
+          <div class="head">
+            <div class="title">CSV Import/Export</div>
+            <div class="badge info">Daten</div>
+          </div>
+          <div class="mini">Spalten: <span class="mono">id,coords,type,diameter,note,lastInspection,status</span></div>
+
+          <div class="btnrow" style="margin-top:12px">
+            <input id="csvFile" type="file" accept=".csv,text/csv" />
+            <button class="btn primary" id="btnImport">Import</button>
+            <button class="btn" id="btnExport">Export</button>
+          </div>
+          <div class="mini" id="importInfo">Noch keine Datei gewählt.</div>
+        </div>
+
+        <div class="panel">
+          <div class="head">
+            <div class="title">Hydrant anlegen</div>
+            <div class="badge info">Pflege</div>
+          </div>
+
+          <label>ID / Bezeichnung</label>
+          <input id="h_id" placeholder="z.B. H-001" />
+
+          <div class="grid2" style="margin-top:10px">
+            <div>
+              <label>Typ</label>
+              <select id="h_type">
+                <option value="Unterflur">Unterflur</option>
+                <option value="Überflur">Überflur</option>
+                <option value="Saugstelle">Saugstelle</option>
+                <option value="Sonstiges">Sonstiges</option>
+              </select>
+            </div>
+            <div>
+              <label>Durchmesser (mm)</label>
+              <input id="h_diam" type="number" min="1" placeholder="z.B. 200" />
+            </div>
+          </div>
+
+          <div class="grid2" style="margin-top:10px">
+            <div>
+              <label>Status</label>
+              <select id="h_status">
+                <option value="green" selected>Einsatzbereit (Grün)</option>
+                <option value="yellow">Eingeschränkt (Gelb)</option>
+                <option value="red">Außer Betrieb (Rot)</option>
+              </select>
+            </div>
+            <div>
+              <label>Letzte Prüfung</label>
+              <input id="h_last" type="date" />
+            </div>
+          </div>
+
+          <label style="margin-top:10px">Koordinaten (ein Feld: „lat, lon“)</label>
+          <input id="h_coords" class="mono" placeholder="z.B. 49.136000, 8.091000" />
+
+          <label style="margin-top:10px">Hinweis/Bemerkung</label>
+          <textarea id="h_note" placeholder="z.B. rechts am Gehweg, Winter: zugeschneit …"></textarea>
+
+          <div class="btnrow">
+            <button class="btn primary" id="btnAddHydrant">Speichern</button>
+            <button class="btn" id="btnPickHydrantOnMap">Position auf Karte wählen</button>
+          </div>
+          <div class="mini">Bearbeiten/Löschen nur im Panel „Bestand“.</div>
+        </div>
+
+        <div class="panel">
+          <div class="head">
+            <div class="title">Bestand</div>
+            <div class="badge fire" id="stockBadge">0</div>
+          </div>
+          <div class="mini">Zentrieren / Bearbeiten / Löschen (nur hier).</div>
+          <div id="stockList" style="display:flex;flex-direction:column;gap:12px; max-height: calc(100vh - 180px); overflow:auto;"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Edit Modal -->
+<div class="modalBack" id="editBack">
+  <div class="modal">
+    <div class="head">
+      <div class="title">Hydrant bearbeiten</div>
+      <div class="badge info" id="editUidBadge">—</div>
+    </div>
+
+    <label>ID / Bezeichnung</label>
+    <input id="e_id" placeholder="z.B. H-001" />
+
+    <div class="grid2" style="margin-top:10px">
+      <div>
+        <label>Typ</label>
+        <select id="e_type">
+          <option value="Unterflur">Unterflur</option>
+          <option value="Überflur">Überflur</option>
+          <option value="Saugstelle">Saugstelle</option>
+          <option value="Sonstiges">Sonstiges</option>
+        </select>
+      </div>
+      <div>
+        <label>Durchmesser (mm)</label>
+        <input id="e_diam" type="number" min="1" placeholder="z.B. 200" />
+      </div>
+    </div>
+
+    <div class="grid2" style="margin-top:10px">
+      <div>
+        <label>Status</label>
+        <select id="e_status">
+          <option value="green">Einsatzbereit (Grün)</option>
+          <option value="yellow">Eingeschränkt (Gelb)</option>
+          <option value="red">Außer Betrieb (Rot)</option>
+        </select>
+      </div>
+      <div>
+        <label>Letzte Prüfung</label>
+        <input id="e_last" type="date" />
+      </div>
+    </div>
+
+    <label style="margin-top:10px">Koordinaten (ein Feld: „lat, lon“)</label>
+    <input id="e_coords" class="mono" placeholder="z.B. 49.136000, 8.091000" />
+
+    <label style="margin-top:10px">Hinweis/Bemerkung</label>
+    <textarea id="e_note" placeholder="…"></textarea>
+
+    <div class="btnrow">
+      <button class="btn" id="btnEditCancel">Abbrechen</button>
+      <button class="btn primary" id="btnEditSave">Speichern</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"><span class="dot"></span><span id="toastText">…</span></div>
+
+<script>
+/* ==========================================================
+   Hydranten Assist – Status + Routing Ignore Red
+   ========================================================== */
+const STORAGE_KEY = "hydranten_assist_status_v1";
+
+/* Start: Billigheim-Ingenheim */
+const DEFAULT_CENTER = [49.1357, 8.0909];
+const DEFAULT_ZOOM = 15;
+
+const NOMINATIM = "https://nominatim.openstreetmap.org/search";
+const OSRM_ROUTE = "https://router.project-osrm.org/route/v1";
+const $ = (id)=>document.getElementById(id);
+
+let state = loadState(); // persisted: hydrants + map + ui (NO incident)
+let map, hydrantLayer, incidentMarker, routeLine;
+let pickMode = null; // "hydrant" | "incident"
+let selectedUid = null;
+
+let incident = null; // NOT persisted
+let lastRoute = { hydrant:null, car:null, foot:null, active:"car" };
+let editUid = null;
+
+function toast(msg){
+  $("toastText").textContent = msg;
+  $("toast").style.display = "flex";
+  clearTimeout(toast._t);
+  toast._t = setTimeout(()=> $("toast").style.display="none", 2600);
+}
+
+/* Persist only hydrants + ui + map */
+function loadState(){
+  try{
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if(!raw) return { hydrants: [], map:{center:DEFAULT_CENTER, zoom:DEFAULT_ZOOM}, ui:{collapsed:false, autoCollapsedOnce:false} };
+    const s = JSON.parse(raw);
+    return {
+      hydrants: Array.isArray(s.hydrants)? s.hydrants : [],
+      map: s.map || {center:DEFAULT_CENTER, zoom:DEFAULT_ZOOM},
+      ui: s.ui || {collapsed:false, autoCollapsedOnce:false}
+    };
+  }catch{
+    return { hydrants: [], map:{center:DEFAULT_CENTER, zoom:DEFAULT_ZOOM}, ui:{collapsed:false, autoCollapsedOnce:false} };
+  }
+}
+function saveState(){
+  const toSave = { hydrants: state.hydrants, map: state.map, ui: state.ui };
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(toSave));
+}
+
+function uid(){ return "h_" + Math.random().toString(16).slice(2) + "_" + Date.now().toString(16); }
+function safeNum(x){ const n = Number(x); return Number.isFinite(n) ? n : null; }
+function escapeHtml(s){ return String(s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+function fmtMeters(m){ return Number.isFinite(m) ? String(Math.round(m)) : "—"; }
+function parseLatLon(input){
+  const s = input.trim();
+  const m = s.match(/^\s*(-?\d+(?:\.\d+)?)\s*[,\s]\s*(-?\d+(?:\.\d+)?)\s*$/);
+  if(!m) return null;
+  const lat = Number(m[1]), lon = Number(m[2]);
+  if(!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+  if(lat < -90 || lat > 90 || lon < -180 || lon > 180) return null;
+  return {lat, lon};
+}
+function haversine(lat1, lon1, lat2, lon2){
+  const R = 6371000;
+  const toRad = x=>x*Math.PI/180;
+  const dLat = toRad(lat2-lat1);
+  const dLon = toRad(lon2-lon1);
+  const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLon/2)**2;
+  return 2*R*Math.asin(Math.sqrt(a));
+}
+function matchesQuery(h, q){
+  if(!q) return true;
+  const s = (h.id+" "+(h.type||"")+" "+(h.note||"")+" "+(h.diameter ?? "")+" "+(h.lastInspection||"")+" "+(h.status||"")).toLowerCase();
+  return s.includes(q.toLowerCase());
+}
+
+/* Status helpers */
+function normalizeStatus(x){
+  const v = String(x || "").toLowerCase().trim();
+  if(v === "red" || v === "rot" || v === "außer betrieb" || v === "ausser betrieb" || v === "outofservice") return "red";
+  if(v === "yellow" || v === "gelb" || v === "eingeschränkt" || v === "eingeschraenkt") return "yellow";
+  return "green";
+}
+function statusLabel(st){
+  if(st === "red") return "Außer Betrieb";
+  if(st === "yellow") return "Eingeschränkt";
+  return "Einsatzbereit";
+}
+function showStatusBoxForHydrant(h){
+  const st = normalizeStatus(h?.status);
+  const box = $("statusBox");
+  const dot = $("statusDot");
+  const txt = $("statusText");
+
+  dot.className = "statusDot " + (st === "red" ? "red" : st === "yellow" ? "yellow" : "green");
+  txt.textContent = statusLabel(st);
+
+  box.classList.add("show");
+}
+function hideStatusBox(){
+  $("statusBox").classList.remove("show");
+}
+
+/* Views */
+function showView(which){
+  $("viewMap").classList.toggle("active", which==="map");
+  $("viewSettings").classList.toggle("active", which==="settings");
+  $("navMap").classList.toggle("primary", which==="map");
+  $("navSettings").classList.toggle("primary", which==="settings");
+  if(which==="map") setTimeout(()=> map?.invalidateSize?.(), 80);
+}
+$("navMap").addEventListener("click", ()=> showView("map"));
+$("navSettings").addEventListener("click", ()=> showView("settings"));
+
+/* Filter accordion */
+$("filterToggle").addEventListener("click", ()=> $("accFilter").classList.toggle("open"));
+
+/* Sidebar collapse */
+function setCollapsed(v){
+  state.ui.collapsed = !!v;
+  $("mapLayout").classList.toggle("collapsed", state.ui.collapsed);
+  $("sidebarToggleLabel").textContent = state.ui.collapsed ? "Panels anzeigen" : "Panels";
+  saveState();
+  setTimeout(()=> map?.invalidateSize?.(), 80);
+}
+$("sidebarToggle").addEventListener("click", ()=> setCollapsed(!state.ui.collapsed));
+
+/* Icons */
+function hydrantIcon(status, selected=false){
+  const st = normalizeStatus(status);
+  const cls = st === "red" ? "status-red" : st === "yellow" ? "status-yellow" : "";
+  return L.divIcon({
+    className:"",
+    html:`<div class="hydrantSquare ${cls} ${selected?"selected":""}"></div>`,
+    iconSize:[22,22],
+    iconAnchor:[11,11]
+  });
+}
+function incidentIcon(){
+  return L.divIcon({
+    className:"",
+    html:`<div class="incidentMarker"></div>`,
+    iconSize:[14,14],
+    iconAnchor:[7,7]
+  });
+}
+
+/* Map init */
+function initMap(){
+  map = L.map("map", { zoomControl:true }).setView(state.map.center, state.map.zoom);
+
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 20,
+    attribution: "&copy; OpenStreetMap-Mitwirkende"
+  }).addTo(map);
+
+  hydrantLayer = L.layerGroup().addTo(map);
+
+  map.on("moveend", ()=>{
+    const c = map.getCenter();
+    state.map.center = [c.lat, c.lng];
+    state.map.zoom = map.getZoom();
+    saveState();
+  });
+
+  map.on("click", (e)=>{
+    if(pickMode === "hydrant"){
+      $("h_coords").value = `${e.latlng.lat.toFixed(6)}, ${e.latlng.lng.toFixed(6)}`;
+      pickMode = null;
+      toast("Hydranten-Position übernommen.");
+      return;
+    }
+    if(pickMode === "incident"){
+      pickMode = null;
+      setIncident(e.latlng.lat, e.latlng.lng, "Kartenklick");
+      toast("Einsatzort gesetzt – Route wird berechnet…");
+      autoRouteToNearestFiltered();
+      return;
+    }
+  });
+
+  renderHydrants();
+  updateCounts();
+  updateIncidentUI();
+  setCollapsed(state.ui?.collapsed ?? false);
+}
+
+/* Filters (IMPORTANT: red always excluded from routing) */
+function filtersActive(){
+  return ($("diamFilter").value.trim() !== "") || ($("q").value.trim() !== "");
+}
+function getDisplayedHydrants(){
+  // display respects filters but can show red (as requested: only routing ignores red)
+  const d = $("diamFilter").value.trim();
+  const q = $("q").value.trim();
+  return state.hydrants.filter(h=>{
+    if(d && String(h.diameter ?? "") !== d) return false;
+    if(!matchesQuery(h, q)) return false;
+    return true;
+  });
+}
+function getRoutableHydrants(){
+  // routing uses same filters but excludes red
+  const list = getDisplayedHydrants();
+  return list.filter(h => normalizeStatus(h.status) !== "red");
+}
+
+/* Tooltip */
+function tooltipHtml(h){
+  const rows = [
+    ["ID", h.id || "—"],
+    ["Typ", h.type || "—"],
+    ["Durchmesser", (h.diameter ?? "—") + " mm"],
+    ["Status", statusLabel(normalizeStatus(h.status))],
+    ["Position", `${h.lat.toFixed(6)}, ${h.lon.toFixed(6)}`],
+    ["Letzte Prüfung", h.lastInspection || "—"],
+    ["Hinweis/Bemerkung", h.note || "—"]
+  ];
+  return `
+    <div style="display:flex;flex-direction:column;gap:10px;min-width:270px">
+      ${rows.map(([k,v])=>`
+        <div>
+          <div style="font-size:11px;color:rgba(255,255,255,.65);margin-bottom:2px;font-weight:900;letter-spacing:.15px">${escapeHtml(k)}</div>
+          <div style="font-weight:1000;font-size:12px;line-height:1.3">${escapeHtml(v)}</div>
+        </div>
+      `).join("")}
+    </div>
+  `;
+}
+
+function renderHydrants(){
+  hydrantLayer.clearLayers();
+  const list = getDisplayedHydrants();
+
+  list.forEach(h=>{
+    const m = L.marker([h.lat, h.lon], { icon: hydrantIcon(h.status, h._uid===selectedUid) }).addTo(hydrantLayer);
+    m.bindTooltip(tooltipHtml(h), {direction:"top", sticky:true, opacity:1});
+
+    // Hover status field top-right
+    m.on("mouseover", ()=> showStatusBoxForHydrant(h));
+    m.on("mouseout", ()=>{
+      // if selected hydrant exists, keep its status visible
+      if(selectedUid){
+        const sel = state.hydrants.find(x=>x._uid===selectedUid);
+        if(sel) showStatusBoxForHydrant(sel);
+        else hideStatusBox();
+      } else hideStatusBox();
+    });
+
+    m.on("click", async ()=>{
+      selectedUid = h._uid;
+      renderHydrants();
+      showStatusBoxForHydrant(h);
+      map.flyTo([h.lat, h.lon], Math.max(map.getZoom(), 16), {duration:.55});
+      if(incident){
+        if(normalizeStatus(h.status)==="red"){
+          toast("Hydrant ist ROT (außer Betrieb) – Routing ignoriert ihn.");
+          return;
+        }
+        await routeAndDisplay(h);
+      }
+    });
+  });
+
+  const total = state.hydrants.length;
+  const shown = list.length;
+  $("countBadge").textContent = filtersActive() ? `${shown}/${total}` : `${total}`;
+
+  // If nothing selected, hide box
+  if(!selectedUid) hideStatusBox();
+}
+
+/* Incident (NOT persisted) */
+function updateIncidentUI(){
+  if(incident){
+    $("incidentBadge").textContent = "gesetzt";
+    $("incidentBadge").className = "badge info";
+    $("incidentCoords").textContent = `${incident.lat.toFixed(6)}, ${incident.lon.toFixed(6)}`;
+  }else{
+    $("incidentBadge").textContent = "nicht gesetzt";
+    $("incidentBadge").className = "badge";
+    $("incidentCoords").textContent = "—";
+    $("nearestInfo").textContent = "—";
+  }
+}
+function clearIncidentUIFields(){
+  $("in_city").value = "";
+  $("in_street").value = "";
+  $("in_coords").value = "";
+}
+function setIncident(lat, lon, label="Einsatzort", fly=true){
+  incident = {lat, lon, label};
+  $("in_coords").value = `${lat.toFixed(6)}, ${lon.toFixed(6)}`;
+
+  if(incidentMarker) map.removeLayer(incidentMarker);
+  incidentMarker = L.marker([lat, lon], {icon: incidentIcon()}).addTo(map);
+
+  if(fly) map.flyTo([lat, lon], Math.max(map.getZoom(), 15), {duration:.6});
+  updateIncidentUI();
+}
+
+async function geocodeFromFields(){
+  const city = $("in_city").value.trim();
+  const street = $("in_street").value.trim();
+  const query = [street, city].filter(Boolean).join(", ").trim();
+  if(!query) throw new Error("Bitte Ort + Straße/Hausnummer eingeben oder Koordinaten nutzen.");
+  const url = `${NOMINATIM}?format=json&q=${encodeURIComponent(query)}&limit=1&addressdetails=1`;
+  const r = await fetch(url, {headers:{ "Accept":"application/json" }});
+  if(!r.ok) throw new Error("Geocoding fehlgeschlagen.");
+  const data = await r.json();
+  if(!data.length) throw new Error("Adresse nicht gefunden.");
+  return {lat:Number(data[0].lat), lon:Number(data[0].lon)};
+}
+
+async function geolocate(){
+  if(!navigator.geolocation){ toast("GPS nicht verfügbar."); return; }
+  const isSecure = window.isSecureContext || location.hostname === "localhost" || location.hostname === "127.0.0.1";
+  const hint = $("gpsHint");
+  if(!isSecure){
+    hint.style.display = "block";
+    hint.textContent = "GPS funktioniert nur über HTTPS oder localhost (nicht per file:// öffnen).";
+  }else hint.style.display = "none";
+
+  toast("Standort wird ermittelt…");
+  navigator.geolocation.getCurrentPosition(
+    pos=>{
+      setIncident(pos.coords.latitude, pos.coords.longitude, "GPS");
+      toast("Einsatzort gesetzt – Route wird berechnet…");
+      autoRouteToNearestFiltered();
+    },
+    err=>{
+      let msg = err.message || "Unbekannter GPS Fehler.";
+      if(err.code === 1) msg = "GPS abgelehnt: Bitte Standortberechtigung erlauben.";
+      if(err.code === 2) msg = "GPS nicht verfügbar: Kein Standortsignal.";
+      if(err.code === 3) msg = "GPS Timeout: Bitte erneut versuchen.";
+      toast(msg);
+    },
+    {enableHighAccuracy:true, timeout: 15000, maximumAge: 3000}
+  );
+}
+
+/* Routing */
+async function osrmRoute(profile, inc, h){
+  const coords = `${inc.lon},${inc.lat};${h.lon},${h.lat}`;
+  const url = `${OSRM_ROUTE}/${profile}/${coords}?overview=full&geometries=geojson&steps=false`;
+  const r = await fetch(url, {headers:{ "Accept":"application/json" }});
+  if(!r.ok) throw new Error("OSRM HTTP error");
+  const data = await r.json();
+  if(data.code !== "Ok" || !data.routes?.length) throw new Error("OSRM no route");
+  const route = data.routes[0];
+  return { distance: route.distance, duration: route.duration, geometry: route.geometry };
+}
+async function drawRoute(geo){
+  if(routeLine) map.removeLayer(routeLine);
+  const outline = L.geoJSON(geo, { style: { weight: 8, opacity: 0.55, color: "#0a0a0a" } }).addTo(map);
+  const main = L.geoJSON(geo, { style: { weight: 5, opacity: 0.95, color: "#2f86ff" } }).addTo(map);
+  routeLine = L.layerGroup([outline, main]).addTo(map);
+  try{ map.fitBounds(main.getBounds().pad(0.10), {animate:true, duration:.6}); }catch{}
+}
+
+function setActiveChip(which){
+  lastRoute.active = which;
+  $("chipCar").classList.toggle("active", which==="car");
+  $("chipFoot").classList.toggle("active", which==="foot");
+}
+async function applyRoute(which){
+  if(!lastRoute.hydrant) return;
+  if(which==="car" && lastRoute.car){
+    setActiveChip("car");
+    await drawRoute(lastRoute.car.geometry);
+  }
+  if(which==="foot" && lastRoute.foot){
+    setActiveChip("foot");
+    await drawRoute(lastRoute.foot.geometry);
+  }
+}
+$("chipCar").addEventListener("click", ()=>applyRoute("car"));
+$("chipFoot").addEventListener("click", ()=>{
+  if($("chipFoot").classList.contains("disabled")) return;
+  applyRoute("foot");
+});
+
+function showRouteBarForHydrant(h, carDist, footDist, footAvailable){
+  const d = (h?.diameter ?? "—");
+  $("routeTitle").textContent = `Nächster Hydrant: Ø ${d} mm`;
+  const type = (h?.type ?? "Hydrant");
+  const note = (h?.note && h.note.trim()) ? h.note.trim() : "keine Bemerkung";
+  $("routeSub").textContent = `${type} • ${note}`;
+  $("distCar").textContent = `${Math.round(carDist)} m`;
+  $("distFoot").textContent = Number.isFinite(footDist) ? `${Math.round(footDist)} m` : "— m";
+  $("chipFoot").classList.toggle("disabled", !footAvailable);
+  $("routeBar").classList.add("show");
+}
+function hideRouteBar(){ $("routeBar").classList.remove("show"); }
+
+function maybeAutoCollapseAfterFirstRoute(){
+  if(state.ui.autoCollapsedOnce) return;
+  state.ui.autoCollapsedOnce = true;
+  saveState();
+  setCollapsed(true);
+}
+
+async function routeAndDisplay(h){
+  if(!incident){ toast("Bitte zuerst Einsatzort setzen."); return; }
+  if(normalizeStatus(h.status)==="red"){ toast("Hydrant ist ROT (außer Betrieb)."); return; }
+
+  try{
+    const car = await osrmRoute("driving", incident, h);
+    let foot = null;
+    try{ foot = await osrmRoute("walking", incident, h); }catch{ foot = null; }
+
+    lastRoute.hydrant = h;
+    lastRoute.car = car;
+    lastRoute.foot = foot;
+
+    selectedUid = h._uid;
+    renderHydrants();
+
+    setActiveChip("car");
+    await drawRoute(car.geometry);
+
+    showRouteBarForHydrant(h, car.distance, foot?.distance ?? NaN, !!foot);
+    maybeAutoCollapseAfterFirstRoute();
+  }catch{
+    toast("Routing fehlgeschlagen (OSRM).");
+  }
+}
+
+async function autoRouteToNearestFiltered(){
+  if(!incident) return;
+
+  const filtered = getRoutableHydrants(); // red excluded
+  if(!filtered.length){
+    hideRouteBar();
+    toast("Kein routbarer Hydrant (Filter/Status).");
+    return;
+  }
+
+  const shortlist = filtered.slice()
+    .sort((a,b)=>haversine(incident.lat, incident.lon, a.lat, a.lon) - haversine(incident.lat, incident.lon, b.lat, b.lon))
+    .slice(0, 6);
+
+  let best = null;
+  for(const h of shortlist){
+    try{
+      const car = await osrmRoute("driving", incident, h);
+      if(!best || car.distance < best.car.distance) best = {hydrant:h, car};
+    }catch{}
+  }
+  if(!best){ toast("Routing fehlgeschlagen (OSRM)."); hideRouteBar(); return; }
+
+  let foot = null;
+  try{ foot = await osrmRoute("walking", incident, best.hydrant); }catch{ foot = null; }
+
+  lastRoute.hydrant = best.hydrant;
+  lastRoute.car = best.car;
+  lastRoute.foot = foot;
+
+  selectedUid = best.hydrant._uid;
+  renderHydrants();
+  showStatusBoxForHydrant(best.hydrant);
+
+  setActiveChip("car");
+  await drawRoute(best.car.geometry);
+
+  showRouteBarForHydrant(best.hydrant, best.car.distance, foot?.distance ?? NaN, !!foot);
+  maybeAutoCollapseAfterFirstRoute();
+}
+
+/* Map panel buttons */
+$("btnUseMapClick").addEventListener("click", ()=>{
+  pickMode = "incident";
+  toast("Klicke auf die Karte, um den Einsatzort zu setzen.");
+});
+$("btnGPS").addEventListener("click", geolocate);
+
+$("btnSetIncident").addEventListener("click", async ()=>{
+  const coordStr = $("in_coords").value.trim();
+  const ll = coordStr ? parseLatLon(coordStr) : null;
+  try{
+    if(ll){
+      setIncident(ll.lat, ll.lon, "Koordinaten");
+      toast("Einsatzort gesetzt – Route wird berechnet…");
+      await autoRouteToNearestFiltered();
+      return;
+    }
+    toast("Adresse wird gesucht…");
+    const g = await geocodeFromFields();
+    setIncident(g.lat, g.lon, "Adresse");
+    toast("Einsatzort gesetzt – Route wird berechnet…");
+    await autoRouteToNearestFiltered();
+  }catch(e){
+    toast(e.message || "Einsatzort konnte nicht gesetzt werden.");
+  }
+});
+
+$("btnFindNearest").addEventListener("click", ()=>{
+  if(!incident){ toast("Bitte Einsatzort setzen."); return; }
+  autoRouteToNearestFiltered();
+});
+
+$("btnClearRoute").addEventListener("click", ()=>{
+  if(routeLine){ map.removeLayer(routeLine); routeLine=null; }
+  hideRouteBar();
+  lastRoute = {hydrant:null, car:null, foot:null, active:"car"};
+  toast("Route ausgeblendet.");
+});
+
+/* Filter changes */
+$("diamFilter").addEventListener("change", ()=>{
+  renderHydrants();
+  if(incident) autoRouteToNearestFiltered();
+});
+$("q").addEventListener("input", ()=>{
+  clearTimeout(renderHydrants._t);
+  renderHydrants._t = setTimeout(()=>{
+    renderHydrants();
+    if(incident) autoRouteToNearestFiltered();
+  }, 220);
+});
+
+/* ===== SETTINGS: add hydrant + CSV + stock + edit ===== */
+function addHydrantFromForm(){
+  const id = $("h_id").value.trim() || "Hydrant";
+  const type = $("h_type").value;
+  const diameter = safeNum($("h_diam").value);
+  const status = normalizeStatus($("h_status").value || "green"); // default green
+  const coords = $("h_coords").value.trim();
+  const ll = parseLatLon(coords);
+  const lastInspection = ($("h_last").value || "").trim();
+  const note = $("h_note").value.trim();
+
+  if(!ll){ toast("Bitte gültige Koordinaten eingeben (lat, lon)."); return; }
+
+  state.hydrants.push({
+    _uid: uid(),
+    id, type, diameter,
+    status,
+    lat: ll.lat, lon: ll.lon,
+    note, lastInspection
+  });
+  saveState();
+  renderHydrants();
+  updateCounts();
+  toast("Hydrant gespeichert.");
+}
+
+function normalizeRow(row){
+  const id = (row.id ?? row.ID ?? row.name ?? row.bezeichnung ?? "").toString().trim() || "Hydrant";
+  const type = (row.type ?? row.typ ?? row.Typ ?? "Unterflur").toString().trim() || "Unterflur";
+  const diameter = safeNum(row.diameter ?? row.diam ?? row.durchmesser ?? row.Durchmesser);
+  const note = (row.note ?? row.notes ?? row.notiz ?? row.Notiz ?? "").toString().trim();
+  const lastInspection = (row.lastInspection ?? row.last_pruefung ?? row.letzte_pruefung ?? row.LetztePruefung ?? "").toString().trim();
+  const status = normalizeStatus(row.status ?? row.Status ?? row.verfuegbarkeit ?? row.Verfuegbarkeit ?? "green");
+
+  let ll = null;
+  const coords = (row.coords ?? row.coord ?? row.koordinaten ?? "").toString().trim();
+  if(coords) ll = parseLatLon(coords);
+
+  if(!ll){
+    const lat = safeNum(row.lat ?? row.latitude ?? row.Lat ?? row.LAT);
+    const lon = safeNum(row.lon ?? row.lng ?? row.longitude ?? row.Lon ?? row.LON);
+    if(lat!==null && lon!==null) ll = {lat, lon};
+  }
+  if(!ll) return null;
+
+  return { _uid: uid(), id, type, diameter, status, lat: ll.lat, lon: ll.lon, note, lastInspection };
+}
+
+function importCSV(file){
+  return new Promise((resolve, reject)=>{
+    Papa.parse(file, {header:true, skipEmptyLines:true, complete: resolve, error: reject});
+  });
+}
+function exportCSV(){
+  const rows = state.hydrants.map(h=>({
+    id: h.id,
+    coords: `${h.lat.toFixed(6)}, ${h.lon.toFixed(6)}`,
+    type: h.type ?? "",
+    diameter: h.diameter ?? "",
+    note: h.note ?? "",
+    lastInspection: h.lastInspection ?? "",
+    status: normalizeStatus(h.status || "green")
+  }));
+  const csv = Papa.unparse(rows);
+  const blob = new Blob([csv], {type:"text/csv;charset=utf-8"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "hydranten_export.csv";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  toast("CSV exportiert.");
+}
+
+/* Edit modal */
+function openEditModal(h){
+  editUid = h._uid;
+  $("editUidBadge").textContent = h.id || "—";
+  $("e_id").value = h.id || "";
+  $("e_type").value = h.type || "Unterflur";
+  $("e_diam").value = (h.diameter ?? "");
+  $("e_status").value = normalizeStatus(h.status || "green");
+  $("e_coords").value = `${h.lat.toFixed(6)}, ${h.lon.toFixed(6)}`;
+  $("e_last").value = h.lastInspection || "";
+  $("e_note").value = h.note || "";
+  $("editBack").classList.add("show");
+}
+function closeEditModal(){
+  editUid = null;
+  $("editBack").classList.remove("show");
+}
+$("btnEditCancel").addEventListener("click", closeEditModal);
+$("editBack").addEventListener("click", (e)=>{ if(e.target.id === "editBack") closeEditModal(); });
+
+$("btnEditSave").addEventListener("click", ()=>{
+  if(!editUid) return;
+  const idx = state.hydrants.findIndex(x=>x._uid===editUid);
+  if(idx<0) return;
+
+  const ll = parseLatLon($("e_coords").value.trim());
+  if(!ll){ toast("Koordinaten ungültig (lat, lon)."); return; }
+
+  state.hydrants[idx] = {
+    ...state.hydrants[idx],
+    id: $("e_id").value.trim() || "Hydrant",
+    type: $("e_type").value,
+    diameter: safeNum($("e_diam").value),
+    status: normalizeStatus($("e_status").value || "green"),
+    lat: ll.lat,
+    lon: ll.lon,
+    lastInspection: ($("e_last").value || "").trim(),
+    note: $("e_note").value.trim()
+  };
+
+  saveState();
+  renderHydrants();
+  updateCounts();
+
+  // keep selected marker consistent
+  if(selectedUid === editUid){
+    const sel = state.hydrants.find(x=>x._uid===selectedUid);
+    if(sel) showStatusBoxForHydrant(sel);
+  }
+
+  closeEditModal();
+  toast("Hydrant aktualisiert.");
+});
+
+/* Stock list */
+function renderStockList(){
+  const el = $("stockList");
+  el.innerHTML = "";
+  if(!state.hydrants.length){
+    el.innerHTML = `<div style="color:rgba(255,255,255,.65);font-size:12px">Noch keine Hydranten gespeichert.</div>`;
+    return;
+  }
+
+  state.hydrants.slice().reverse().forEach(h=>{
+    const item = document.createElement("div");
+    item.style.border = "1px solid rgba(255,255,255,.12)";
+    item.style.background = "linear-gradient(180deg, rgba(28,28,28,.95), rgba(18,18,18,.96))";
+    item.style.borderRadius = "18px";
+    item.style.padding = "12px";
+    item.style.boxShadow = "inset 0 1px 0 rgba(255,255,255,.06), 0 14px 26px rgba(0,0,0,.45)";
+    item.style.display = "flex";
+    item.style.justifyContent = "space-between";
+    item.style.gap = "12px";
+
+    const st = normalizeStatus(h.status);
+    const stTxt = statusLabel(st);
+    const stColor = st === "red" ? "rgba(224,18,18,.9)" : st === "yellow" ? "rgba(255,212,0,.9)" : "rgba(46,229,157,.9)";
+
+    item.innerHTML = `
+      <div>
+        <div style="font-weight:1000;letter-spacing:.2px">${escapeHtml(h.id)}</div>
+        <div style="color:rgba(255,255,255,.70);font-size:12px;margin-top:6px">
+          ${escapeHtml(h.type||"—")} • ${(h.diameter ?? "—")} mm • ${escapeHtml(h.lastInspection || "—")}
+        </div>
+        <div style="margin-top:6px;display:flex;align-items:center;gap:8px">
+          <span style="width:10px;height:10px;border-radius:50%;background:${stColor};box-shadow:0 0 0 4px rgba(255,255,255,.06)"></span>
+          <span style="font-size:12px;color:rgba(255,255,255,.72);font-weight:900">${escapeHtml(stTxt)}</span>
+        </div>
+        <div style="color:rgba(255,255,255,.60);font-size:12px;margin-top:6px;font-family:ui-monospace,Menlo,Consolas">
+          ${h.lat.toFixed(6)}, ${h.lon.toFixed(6)}
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:10px;align-items:flex-end">
+        <button class="btn" data-act="center">Zentrieren</button>
+        <button class="btn" data-act="edit">Bearbeiten</button>
+        <button class="btn warn" data-act="del">Löschen</button>
+      </div>
+    `;
+
+    item.querySelector('[data-act="center"]').addEventListener("click", (e)=>{
+      e.stopPropagation();
+      showView("map");
+      selectedUid = h._uid;
+      renderHydrants();
+      showStatusBoxForHydrant(h);
+      map.flyTo([h.lat, h.lon], Math.max(map.getZoom(), 16), {duration:.55});
+    });
+
+    item.querySelector('[data-act="edit"]').addEventListener("click", (e)=>{
+      e.stopPropagation();
+      openEditModal(h);
+    });
+
+    item.querySelector('[data-act="del"]').addEventListener("click", (e)=>{
+      e.stopPropagation();
+      if(!confirm("Hydrant wirklich löschen?")) return;
+      const idx = state.hydrants.findIndex(x=>x._uid===h._uid);
+      if(idx>=0){
+        state.hydrants.splice(idx,1);
+        saveState();
+        if(selectedUid === h._uid){
+          selectedUid = null;
+          hideStatusBox();
+        }
+        renderHydrants();
+        updateCounts();
+        toast("Hydrant gelöscht.");
+      }
+    });
+
+    el.appendChild(item);
+  });
+}
+
+function updateCounts(){
+  $("stockBadge").textContent = `${state.hydrants.length}`;
+  renderStockList();
+}
+
+/* Settings events */
+$("btnAddHydrant").addEventListener("click", addHydrantFromForm);
+$("btnPickHydrantOnMap").addEventListener("click", ()=>{
+  pickMode = "hydrant";
+  showView("map");
+  toast("Klicke auf die Karte, um die Hydranten-Position zu wählen.");
+});
+$("btnImport").addEventListener("click", async ()=>{
+  const f = $("csvFile").files?.[0];
+  if(!f){ toast("Bitte CSV wählen."); return; }
+  try{
+    toast("CSV wird importiert…");
+    const parsed = await importCSV(f);
+    const added = [];
+    for(const row of parsed.data){
+      const h = normalizeRow(row);
+      if(h) added.push(h);
+    }
+    if(!added.length){ toast("Keine gültigen Zeilen (Koordinaten fehlen?)."); return; }
+    state.hydrants.push(...added);
+    saveState();
+    renderHydrants();
+    updateCounts();
+    toast(`Import ok: ${added.length}`);
+  }catch{
+    toast("CSV Import fehlgeschlagen.");
+  }
+});
+$("csvFile").addEventListener("change", ()=>{
+  const f = $("csvFile").files?.[0];
+  $("importInfo").textContent = f ? `Gewählt: ${f.name}` : "Noch keine Datei gewählt.";
+});
+$("btnExport").addEventListener("click", exportCSV);
+
+/* Einsatzabschluss: clear incident + route + fields, reset map */
+function endIncident(){
+  if(routeLine){ map.removeLayer(routeLine); routeLine=null; }
+  hideRouteBar();
+  lastRoute = {hydrant:null, car:null, foot:null, active:"car"};
+
+  incident = null;
+  if(incidentMarker){ map.removeLayer(incidentMarker); incidentMarker=null; }
+
+  clearIncidentUIFields();
+  $("q").value = "";
+  $("diamFilter").value = "";
+  $("accFilter").classList.remove("open");
+
+  selectedUid = null;
+  hideStatusBox();
+  renderHydrants();
+  updateIncidentUI();
+
+  setCollapsed(false);
+
+  // reset map to default
+  map.setView(DEFAULT_CENTER, DEFAULT_ZOOM, {animate:true});
+  state.map = { center: DEFAULT_CENTER, zoom: DEFAULT_ZOOM };
+  saveState();
+
+  toast("Einsatz abgeschlossen.");
+}
+$("btnCloseIncident").addEventListener("click", endIncident);
+
+/* MAP buttons */
+$("btnUseMapClick").addEventListener("click", ()=>{
+  pickMode = "incident";
+  toast("Klicke auf die Karte, um den Einsatzort zu setzen.");
+});
+$("btnGPS").addEventListener("click", geolocate);
+$("btnSetIncident").addEventListener("click", async ()=>{
+  const coordStr = $("in_coords").value.trim();
+  const ll = coordStr ? parseLatLon(coordStr) : null;
+  try{
+    if(ll){
+      setIncident(ll.lat, ll.lon, "Koordinaten");
+      toast("Einsatzort gesetzt – Route wird berechnet…");
+      await autoRouteToNearestFiltered();
+      return;
+    }
+    toast("Adresse wird gesucht…");
+    const g = await geocodeFromFields();
+    setIncident(g.lat, g.lon, "Adresse");
+    toast("Einsatzort gesetzt – Route wird berechnet…");
+    await autoRouteToNearestFiltered();
+  }catch(e){
+    toast(e.message || "Einsatzort konnte nicht gesetzt werden.");
+  }
+});
+
+/* Start */
+initMap();
+updateCounts();
+renderHydrants();
+updateIncidentUI();
+toast("Start: Billigheim-Ingenheim");
+</script>
+</body>
+</html>
