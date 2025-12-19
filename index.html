@@ -318,13 +318,23 @@
       mix-blend-mode: screen;
     }
     .hydrantSquare.status-red::before{
-      background: linear-gradient(180deg, rgba(224,18,18,.75), rgba(224,18,18,.25));
+      background: linear-gradient(180deg, rgba(224,18,18,.78), rgba(224,18,18,.25));
       mix-blend-mode: screen;
     }
-    /* Red marker also slightly different shadow */
-    .hydrantSquare.status-red{
-      box-shadow: 0 14px 32px rgba(224,18,18,.18);
-      border-color: rgba(255,255,255,.70);
+
+    /* ✅ ROT = durchgestrichen */
+    .hydrantSquare.status-red .slash{
+      position:absolute;
+      left:-20%;
+      top:45%;
+      width:140%;
+      height:3px;
+      background: rgba(255,255,255,.92);
+      box-shadow: 0 0 0 3px rgba(224,18,18,.20);
+      transform: rotate(-35deg);
+      border-radius: 999px;
+      opacity:.95;
+      pointer-events:none;
     }
 
     /* Incident marker: red dot + ring */
@@ -572,15 +582,6 @@
             <button class="btn ok" id="btnGPS">Meine Position ermitteln</button>
           </div>
 
-          <div class="mini" id="miniAktuell">
-            <span class="badge info">Aktuell</span>
-            <span class="mono" id="incidentCoords">—</span>
-          </div>
-          <div class="mini" id="miniRoute" style="margin-top:6px">
-            <span class="badge info">Route</span>
-            <span id="nearestInfo">—</span>
-          </div>
-
           <div class="mini" id="gpsHint" style="display:none;"></div>
         </div>
 
@@ -816,7 +817,7 @@
 
 <script>
 /* ==========================================================
-   Hydranten Assist – Status + Routing Ignore Red
+   Hydranten Assist – Rot durchgestrichen
    ========================================================== */
 const STORAGE_KEY = "hydranten_assist_status_v1";
 
@@ -867,7 +868,6 @@ function saveState(){
 function uid(){ return "h_" + Math.random().toString(16).slice(2) + "_" + Date.now().toString(16); }
 function safeNum(x){ const n = Number(x); return Number.isFinite(n) ? n : null; }
 function escapeHtml(s){ return String(s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
-function fmtMeters(m){ return Number.isFinite(m) ? String(Math.round(m)) : "—"; }
 function parseLatLon(input){
   const s = input.trim();
   const m = s.match(/^\s*(-?\d+(?:\.\d+)?)\s*[,\s]\s*(-?\d+(?:\.\d+)?)\s*$/);
@@ -903,20 +903,6 @@ function statusLabel(st){
   if(st === "yellow") return "Eingeschränkt";
   return "Einsatzbereit";
 }
-function showStatusBoxForHydrant(h){
-  const st = normalizeStatus(h?.status);
-  const box = $("statusBox");
-  const dot = $("statusDot");
-  const txt = $("statusText");
-
-  dot.className = "statusDot " + (st === "red" ? "red" : st === "yellow" ? "yellow" : "green");
-  txt.textContent = statusLabel(st);
-
-  box.classList.add("show");
-}
-function hideStatusBox(){
-  $("statusBox").classList.remove("show");
-}
 
 /* Views */
 function showView(which){
@@ -946,9 +932,10 @@ $("sidebarToggle").addEventListener("click", ()=> setCollapsed(!state.ui.collaps
 function hydrantIcon(status, selected=false){
   const st = normalizeStatus(status);
   const cls = st === "red" ? "status-red" : st === "yellow" ? "status-yellow" : "";
+  const slash = (st === "red") ? `<span class="slash"></span>` : ``; // ✅ STRICH
   return L.divIcon({
     className:"",
-    html:`<div class="hydrantSquare ${cls} ${selected?"selected":""}"></div>`,
+    html:`<div class="hydrantSquare ${cls} ${selected?"selected":""}">${slash}</div>`,
     iconSize:[22,22],
     iconAnchor:[11,11]
   });
@@ -961,6 +948,18 @@ function incidentIcon(){
     iconAnchor:[7,7]
   });
 }
+
+/* Status box */
+function showStatusBoxForHydrant(h){
+  const st = normalizeStatus(h?.status);
+  const box = $("statusBox");
+  const dot = $("statusDot");
+  const txt = $("statusText");
+  dot.className = "statusDot " + (st === "red" ? "red" : st === "yellow" ? "yellow" : "green");
+  txt.textContent = statusLabel(st);
+  box.classList.add("show");
+}
+function hideStatusBox(){ $("statusBox").classList.remove("show"); }
 
 /* Map init */
 function initMap(){
@@ -1002,12 +1001,11 @@ function initMap(){
   setCollapsed(state.ui?.collapsed ?? false);
 }
 
-/* Filters (IMPORTANT: red always excluded from routing) */
+/* Filters */
 function filtersActive(){
   return ($("diamFilter").value.trim() !== "") || ($("q").value.trim() !== "");
 }
 function getDisplayedHydrants(){
-  // display respects filters but can show red (as requested: only routing ignores red)
   const d = $("diamFilter").value.trim();
   const q = $("q").value.trim();
   return state.hydrants.filter(h=>{
@@ -1017,9 +1015,8 @@ function getDisplayedHydrants(){
   });
 }
 function getRoutableHydrants(){
-  // routing uses same filters but excludes red
   const list = getDisplayedHydrants();
-  return list.filter(h => normalizeStatus(h.status) !== "red");
+  return list.filter(h => normalizeStatus(h.status) !== "red"); // ✅ ROT wird ignoriert
 }
 
 /* Tooltip */
@@ -1053,10 +1050,8 @@ function renderHydrants(){
     const m = L.marker([h.lat, h.lon], { icon: hydrantIcon(h.status, h._uid===selectedUid) }).addTo(hydrantLayer);
     m.bindTooltip(tooltipHtml(h), {direction:"top", sticky:true, opacity:1});
 
-    // Hover status field top-right
     m.on("mouseover", ()=> showStatusBoxForHydrant(h));
     m.on("mouseout", ()=>{
-      // if selected hydrant exists, keep its status visible
       if(selectedUid){
         const sel = state.hydrants.find(x=>x._uid===selectedUid);
         if(sel) showStatusBoxForHydrant(sel);
@@ -1082,8 +1077,6 @@ function renderHydrants(){
   const total = state.hydrants.length;
   const shown = list.length;
   $("countBadge").textContent = filtersActive() ? `${shown}/${total}` : `${total}`;
-
-  // If nothing selected, hide box
   if(!selectedUid) hideStatusBox();
 }
 
@@ -1092,12 +1085,9 @@ function updateIncidentUI(){
   if(incident){
     $("incidentBadge").textContent = "gesetzt";
     $("incidentBadge").className = "badge info";
-    $("incidentCoords").textContent = `${incident.lat.toFixed(6)}, ${incident.lon.toFixed(6)}`;
   }else{
     $("incidentBadge").textContent = "nicht gesetzt";
     $("incidentBadge").className = "badge";
-    $("incidentCoords").textContent = "—";
-    $("nearestInfo").textContent = "—";
   }
 }
 function clearIncidentUIFields(){
@@ -1246,7 +1236,7 @@ async function routeAndDisplay(h){
 async function autoRouteToNearestFiltered(){
   if(!incident) return;
 
-  const filtered = getRoutableHydrants(); // red excluded
+  const filtered = getRoutableHydrants();
   if(!filtered.length){
     hideRouteBar();
     toast("Kein routbarer Hydrant (Filter/Status).");
@@ -1341,7 +1331,7 @@ function addHydrantFromForm(){
   const id = $("h_id").value.trim() || "Hydrant";
   const type = $("h_type").value;
   const diameter = safeNum($("h_diam").value);
-  const status = normalizeStatus($("h_status").value || "green"); // default green
+  const status = normalizeStatus($("h_status").value || "green");
   const coords = $("h_coords").value.trim();
   const ll = parseLatLon(coords);
   const lastInspection = ($("h_last").value || "").trim();
@@ -1454,7 +1444,6 @@ $("btnEditSave").addEventListener("click", ()=>{
   renderHydrants();
   updateCounts();
 
-  // keep selected marker consistent
   if(selectedUid === editUid){
     const sel = state.hydrants.find(x=>x._uid===selectedUid);
     if(sel) showStatusBoxForHydrant(sel);
@@ -1549,6 +1538,35 @@ function updateCounts(){
   renderStockList();
 }
 
+/* Einsatzabschluss: clear incident + route + fields, reset map */
+function endIncident(){
+  if(routeLine){ map.removeLayer(routeLine); routeLine=null; }
+  hideRouteBar();
+  lastRoute = {hydrant:null, car:null, foot:null, active:"car"};
+
+  incident = null;
+  if(incidentMarker){ map.removeLayer(incidentMarker); incidentMarker=null; }
+
+  clearIncidentUIFields();
+  $("q").value = "";
+  $("diamFilter").value = "";
+  $("accFilter").classList.remove("open");
+
+  selectedUid = null;
+  hideStatusBox();
+  renderHydrants();
+  updateIncidentUI();
+
+  setCollapsed(false);
+
+  map.setView(DEFAULT_CENTER, DEFAULT_ZOOM, {animate:true});
+  state.map = { center: DEFAULT_CENTER, zoom: DEFAULT_ZOOM };
+  saveState();
+
+  toast("Einsatz abgeschlossen.");
+}
+$("btnCloseIncident").addEventListener("click", endIncident);
+
 /* Settings events */
 $("btnAddHydrant").addEventListener("click", addHydrantFromForm);
 $("btnPickHydrantOnMap").addEventListener("click", ()=>{
@@ -1583,68 +1601,11 @@ $("csvFile").addEventListener("change", ()=>{
 });
 $("btnExport").addEventListener("click", exportCSV);
 
-/* Einsatzabschluss: clear incident + route + fields, reset map */
-function endIncident(){
-  if(routeLine){ map.removeLayer(routeLine); routeLine=null; }
-  hideRouteBar();
-  lastRoute = {hydrant:null, car:null, foot:null, active:"car"};
-
-  incident = null;
-  if(incidentMarker){ map.removeLayer(incidentMarker); incidentMarker=null; }
-
-  clearIncidentUIFields();
-  $("q").value = "";
-  $("diamFilter").value = "";
-  $("accFilter").classList.remove("open");
-
-  selectedUid = null;
-  hideStatusBox();
-  renderHydrants();
-  updateIncidentUI();
-
-  setCollapsed(false);
-
-  // reset map to default
-  map.setView(DEFAULT_CENTER, DEFAULT_ZOOM, {animate:true});
-  state.map = { center: DEFAULT_CENTER, zoom: DEFAULT_ZOOM };
-  saveState();
-
-  toast("Einsatz abgeschlossen.");
-}
-$("btnCloseIncident").addEventListener("click", endIncident);
-
-/* MAP buttons */
-$("btnUseMapClick").addEventListener("click", ()=>{
-  pickMode = "incident";
-  toast("Klicke auf die Karte, um den Einsatzort zu setzen.");
-});
-$("btnGPS").addEventListener("click", geolocate);
-$("btnSetIncident").addEventListener("click", async ()=>{
-  const coordStr = $("in_coords").value.trim();
-  const ll = coordStr ? parseLatLon(coordStr) : null;
-  try{
-    if(ll){
-      setIncident(ll.lat, ll.lon, "Koordinaten");
-      toast("Einsatzort gesetzt – Route wird berechnet…");
-      await autoRouteToNearestFiltered();
-      return;
-    }
-    toast("Adresse wird gesucht…");
-    const g = await geocodeFromFields();
-    setIncident(g.lat, g.lon, "Adresse");
-    toast("Einsatzort gesetzt – Route wird berechnet…");
-    await autoRouteToNearestFiltered();
-  }catch(e){
-    toast(e.message || "Einsatzort konnte nicht gesetzt werden.");
-  }
-});
-
 /* Start */
 initMap();
 updateCounts();
 renderHydrants();
 updateIncidentUI();
-toast("Start: Billigheim-Ingenheim");
 </script>
 </body>
 </html>
